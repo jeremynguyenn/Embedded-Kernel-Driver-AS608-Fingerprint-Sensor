@@ -1,0 +1,27 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "brcm,bcm2711";
+
+    fragment@0 {
+        target = <&uart0>;
+        __overlay__ {
+            pinctrl-0 = <&uart0_pins>;
+            pinctrl-names = "default";
+            status = "okay";
+        };
+    };
+
+    fragment@1 {
+        target-path = "/";
+        __overlay__ {
+            as608@0 {
+                compatible = "synochip,as608";
+                reg = <0>;
+                baud-rate = <57600>;
+                status = "okay";
+            };
+        };
+    };
+};
