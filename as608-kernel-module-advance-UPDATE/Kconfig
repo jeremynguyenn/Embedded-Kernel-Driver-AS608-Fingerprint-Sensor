@@ -1,0 +1,7 @@
+config AS608
+    tristate "AS608 Fingerprint Driver"
+    depends on SERIAL_8250
+
+config KUNIT_TEST_AS608
+    bool "KUnit test for AS608"
+    depends on KUNIT && AS608

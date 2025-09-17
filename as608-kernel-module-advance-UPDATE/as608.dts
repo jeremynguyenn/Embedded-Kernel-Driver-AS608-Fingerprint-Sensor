@@ -1,0 +1,33 @@
+/dts-v1/;
+/plugin/;
+
+/* Device tree overlay for AS608 fingerprint sensor.
+ * Configures UART and device properties for Raspberry Pi BCM2711.
+ */
+
+/ {
+    compatible = "brcm,bcm2711";
+
+    fragment@0 {
+        target = <&uart0>;
+        __overlay__ {
+            pinctrl-0 = <&uart0_pins>;
+            pinctrl-names = "default";
+            status = "okay";
+            reg = <0x7e201000 0x1000>;
+            interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
+        };
+    };
+
+    fragment@1 {
+        target-path = "/";
+        __overlay__ {
+            as608@0 {
+                compatible = "synochip,as608";
+                reg = <0>;
+                baud-rate = <57600>;
+                status = "okay";
+            };
+        };
+    };
+};
