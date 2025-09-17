@@ -56,6 +56,8 @@ The code is organized as a Linux kernel module with multiple source files for mo
 - **Makefile**: Builds the kernel module (`as608.ko`), with targets for install (insmod, mknod) and uninstall (rmmod, rm).
   - Knowledge: Kernel build system (`obj-m`, `KDIR`), module compilation, device node creation.
 
+## Part 1: as608-kernel-driver-basic
+
 ## Installation for Raspberry Pi
 
 To install the AS608 driver on a Raspberry Pi, follow these steps:
@@ -220,3 +222,183 @@ Capacity: 1000
 Valid Templates: 5
 ```
 Results depend on hardware and fingerprints. Check `dmesg` for errors if the sensor doesn't respond.
+
+
+## Part 2: as608-kernel-module-advance
+
+### Introduction
+The advanced module builds on the basic driver, adding robust IPC mechanisms, enhanced error handling, and a feature-rich user-space application. It supports all basic features plus advanced operations like high-speed verification, notepad read/write, random number generation, and GPIO control. The module uses POSIX message queues, pipes, shared memory, and semaphores for user-kernel communication, making it suitable for complex applications like smart locks or attendance systems.
+
+### Additional Functionality
+- **Advanced Fingerprint Ops**: High-speed verification, index table retrieval, flash feature upload/download.
+- **Notepad and Random**: Write/read notepad, generate random numbers.
+- **GPIO Control**: Set/read GPIO levels (e.g., for external hardware control).
+- **IPC Mechanisms**: Message queues (`/as608_mq`), pipes, shared memory (`/as608_shm`), semaphores (`/as608_sem`) for real-time data exchange.
+- **Threading**: Kernel thread for UART reading, user-space threads for MQ/pipe monitoring.
+- **Error Handling**: SIGUSR1 signals on critical errors (e.g., memory allocation failures).
+- **Non-blocking I/O**: Supports `O_NONBLOCK` and polling (`poll` syscall).
+
+### Code Structure Enhancements
+- **as608_core.c**: Adds kernel thread (`as608_read_thread`) for continuous UART reading, pipe/message queue integration, and polling support.
+- **as608_commands.c**: Adds advanced commands (`as608_high_speed_verify`, `as608_get_index_table`, etc.), shared memory initialization (`as608_init_shm`).
+- **as608_ioctl.c**: Expands to 22 ioctls, including GPIO and index table operations.
+- **as608_user.c**: Multi-threaded app with MQ/pipe threads, shared memory (`mmap`), semaphore sync, and signal handling (SIGINT, SIGTERM, SIGHUP, SIGUSR1).
+- **as608.h**: Extended structs (`as608_gpio_data`, `as608_index_table_data`) and enums for new features.
+
+### Installation and Setup
+The installation process is identical to Part 1, with additional notes for advanced features:
+## Version 1:
+1. Navigate to `/boot` (or `/boot/firmware` on newer Raspberry Pi OS).
+2. Convert the device tree blob (.dtb) to source (.dts):
+   ```
+   dtc -I dtb -O dts -o bcm2711-rpi-4-b.dts bcm2711-rpi-4-b.dtb
+   ```
+   *Note*: Replace `bcm2711-rpi-4-b.dtb` with your model's .dtb (e.g., `bcm2710-rpi-3-b.dtb` for Pi 3).
+3. Open the .dts file, locate the `&uart0` node, and add/enable the AS608 overlay from `as608.dts`:
+   ```
+   &uart0 {
+       pinctrl-0 = <&uart0_pins>;
+       pinctrl-names = "default";
+       status = "okay";
+   };
+   / {
+       as608@0 {
+           compatible = "synochip,as608";
+           reg = <0>;
+           baud-rate = <57600>;
+           status = "okay";
+       };
+   };
+   ```
+4. Recompile to .dtb and reboot:
+   ```
+   dtc -I dts -O dtb -o bcm2711-rpi-4-b.dtb bcm2711-rpi-4-b.dts
+   sudo reboot
+   ```
+   Alternatively, compile `as608.dts` to an overlay:
+   ```
+   dtc -@ -I dts -O dtb -o as608.dtbo as608.dts
+   sudo cp as608.dtbo /boot/overlays/
+   ```
+   Add to `/boot/config.txt`: `dtoverlay=as608` and reboot.
+
+#### Step 2: Build the Kernel Module and User App
+1. Install kernel headers:
+   ```
+   sudo apt install raspberrypi-kernel-headers
+   ```
+2. In the source directory:
+   - Build all (module + app):
+     ```
+     make all
+     ```
+   - Build only module:
+     ```
+     make
+     ```
+   - Build only user app:
+     ```
+     make user
+     ```
+   - Clean artifacts:
+     ```
+     make clean
+     ```
+
+#### Step 3: Install the Kernel Module
+1. Load the module:
+   ```
+   sudo insmod as608.ko
+   ```
+2. Create device node:
+   ```
+   sudo mknod /dev/as608 c 10 $(grep as608 /proc/misc | awk '{print $1}')
+   ```
+3. Verify installation:
+   ```
+   dmesg | grep AS608
+   ```
+   Expect: "AS608 UART: Port initialized", "AS608: Probed".
+4. To remove:
+   ```
+   sudo rm /dev/as608
+   sudo rmmod as608
+   ```
+
+### Usage
+Run the user-space application to test the sensor:
+```
+./as608_user [ioctl_cmd]
+```
+- No args: Executes a sequence of ioctls (e.g., get image, enroll, verify).
+- With arg: Runs specific ioctl (e.g., `./as608_user ENROLL` for enrollment).
+- Place finger on sensor when prompted for fingerprint ops.
+
+Change baud rate via sysfs:
+```
+echo 115200 > /sys/devices/platform/.../baud_rate
+cat /sys/devices/platform/.../baud_rate
+```
+Find the sysfs path with `ls /sys/devices`.
+
+## Version 2
+
+#### Step 1: Device Tree Overlay
+Same as Part 1. Ensure `as608.dts` is applied via `/boot/config.txt` or manual .dtb editing.
+
+#### Step 2: Build
+Same as Part 1. The Makefile supports:
+- `make all`: Builds module (`as608.ko`) and app (`as608_user`).
+- `make driver`: Builds only module.
+- `make user`: Builds only app.
+- `make clean`: Removes build artifacts.
+- `make cleanall`: Removes all generated files except sources.
+
+#### Step 3: Install
+Same as Part 1. Additionally, ensure POSIX IPC permissions:
+```
+sudo chmod 666 /dev/mqueue/as608_mq
+sudo chmod 666 /dev/shm/as608_shm
+sudo chmod 666 /dev/shm/as608_sem
+```
+
+### Usage
+Run the advanced user app:
+```
+./as608_user [ioctl_cmd]
+```
+- Supported `ioctl_cmd`: `GENERATE_BIN_IMAGE`, `GET_VALID_TEMPLATE_NUM`, `SET_GPIO_LEVEL`, `GET_INDEX_TABLE`, etc.
+- Example: `./as608_user SET_GPIO_LEVEL` sets GPIO level (requires `as608_gpio_data` setup).
+
+Monitor IPC:
+- Message queue: Logs received data ("Received from MQ: ...").
+- Pipe: Logs pipe data ("Received from pipe: ...").
+- Shared memory: Used for large data transfers (e.g., images).
+- Semaphore: Synchronizes access to `/dev/as608`.
+
+Baud rate configuration:
+```
+echo 9600 > /sys/devices/platform/.../baud_rate
+```
+
+### Expected Results
+- **dmesg Logs**: Same as Part 1, plus "AS608 UART: Reading Y bytes", "AS608 UART: Writing Z bytes".
+- **User App**: Threads log "Pipe thread started", "Received from MQ: ...". Ioctls like `GET_INDEX_TABLE` return table data, `SET_GPIO_LEVEL` sets GPIO state.
+- **Fingerprint Ops**: Enroll yields page number, verification returns score/page, index table shows stored templates.
+- **Errors**: SIGUSR1 on failures (e.g., buffer overflow), app exits gracefully on SIGINT.
+- **IPC**: MQ/pipe logs confirm data transfer; shared memory handles large buffers.
+
+*Note*: Test with AS608 connected to UART0 (GPIO14/15 on Pi). Without hardware, expect dummy data (0xAA).
+
+## Troubleshooting
+- **Module Load Fails**: Check `dmesg` for errors, ensure kernel headers match kernel version (`uname -r`).
+- **Device Not Found**: Verify `/dev/as608` exists, re-run `mknod`.
+- **UART Issues**: Confirm UART0 enabled in `/boot/config.txt` (`enable_uart=1`).
+- **IPC Errors**: Check permissions on `/dev/mqueue/*`, `/dev/shm/*`.
+- **No Fingerprint Response**: Ensure AS608 is powered (3.3V) and connected to correct pins.
+
+## License
+GPL (see `MODULE_LICENSE("GPL")` in `as608_core.c`).
+
+## Author
+Nguyen Nhan (see `MODULE_AUTHOR` in `as608_core.c`).
